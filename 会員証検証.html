@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>会員証 読み取り・検証</title>
+
+<style>
+body {
+  font-family: sans-serif;
+  background: #f4f4f4;
+  padding: 20px;
+}
+
+h1 {
+  margin-bottom: 10px;
+}
+
+#reader {
+  width: 320px;
+  margin-bottom: 15px;
+}
+
+.result {
+  background: #fff;
+  padding: 15px;
+  border-radius: 8px;
+  max-width: 420px;
+}
+
+.ok {
+  color: green;
+  font-weight: bold;
+}
+
+.ng {
+  color: red;
+  font-weight: bold;
+}
+
+.info {
+  margin-top: 10px;
+  font-family:
+    "游明朝",
+    "Yu Mincho",
+    "ヒラギノ明朝 ProN",
+    "Hiragino Mincho ProN",
+    "MS P明朝",
+    serif;
+}
+</style>
+</head>
+
+<body>
+
+<h1>会員証 読み取り・検証</h1>
+
+<div id="reader"></div>
+
+<div class="result" id="result">
+  <div id="statusText">QRコードを読み取ってください</div>
+  <div class="info" id="detail"></div>
+</div>
+
+<!-- QR reader -->
+<script src="https://unpkg.com/html5-qrcode"></script>
+
+<script>
+const SECRET = "change-this-secret-passphrase"; // ★発行側と同じもの
+
+async function verifyHmac(data, sig) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(SECRET),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const check = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    enc.encode(JSON.stringify(data))
+  );
+  const checkSig = btoa(
+    String.fromCharCode(...new Uint8Array(check))
+  );
+  return checkSig === sig;
+}
+
+function judge(payload, verified) {
+  const now = new Date();
+  const expiry = new Date(payload.expiry);
+
+  if (!verified) {
+    return { text: "改ざん検出", cls: "ng" };
+  }
+
+  if (payload.status === "Disabled") {
+    return { text: "退会済（入場不可）", cls: "ng" };
+  }
+
+  if (payload.status === "Banned") {
+    return { text: "出禁（入場不可）", cls: "ng" };
+  }
+
+  if (expiry < now) {
+    return { text: "期限切れ（入場不可）", cls: "ng" };
+  }
+
+  return { text: "入場可", cls: "ok" };
+}
+
+const html5QrCode = new Html5Qrcode("reader");
+
+html5QrCode.start(
+  { facingMode: "environment" },
+  { fps: 10, qrbox: 250 },
+  async (decodedText) => {
+    try {
+      const obj = JSON.parse(decodedText);
+      const verified = await verifyHmac(obj.data, obj.sig);
+      const j = judge(obj.data, verified);
+
+      document.getElementById("statusText").textContent = j.text;
+      document.getElementById("statusText").className = j.cls;
+
+      document.getElementById("detail").innerHTML = `
+        名前：${obj.data.name}<br>
+        会員番号：${obj.data.memberId}<br>
+        有効期限：${obj.data.expiry}<br>
+        更新回数：${obj.data.renewCount}<br>
+        状態：${obj.data.status}<br>
+        内部Ver：${obj.data.version}
+      `;
+    } catch (e) {
+      document.getElementById("statusText").textContent =
+        "読み取りエラー";
+      document.getElementById("statusText").className = "ng";
+    }
+  }
+);
+</script>
+
+</body>
+</html>
